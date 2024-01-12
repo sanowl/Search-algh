@@ -1,10 +1,11 @@
 import numpy as np
 import nltk
-from nltk.tokenize import word_tokenize
+import gensim
+from nltk.tokenize import word_tokenize, RegexpTokenizer
 from nltk.corpus import stopwords
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from gensim.models import Word2Vec
+from gensim.models import Word2Vec, Phrases
 from sklearn.decomposition import TruncatedSVD
 
 # Download necessary NLTK data
@@ -15,25 +16,40 @@ class AdvancedSearchEngine:
     def __init__(self, documents):
         self.documents = documents
         self.stop_words = set(stopwords.words('english'))
-        self.tfidf_vectorizer = TfidfVectorizer(stop_words='english')
-        self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(documents)
+        self.tokenizer = RegexpTokenizer(r'\w+')
 
-        # Word2Vec Model
-        self.word2vec = self.train_word2vec(documents)
+        # Enhanced Text Normalization
+        normalized_documents = [self.normalize_text(doc) for doc in documents]
+
+        # TF-IDF Model
+        self.tfidf_vectorizer = TfidfVectorizer(stop_words='english')
+        self.tfidf_matrix = self.tfidf_vectorizer.fit_transform(normalized_documents)
+
+        # Phrase Detection and Word2Vec Model
+        self.word2vec = self.train_word2vec(normalized_documents)
 
         # LSA Model
         self.lsa_model = TruncatedSVD(n_components=100)
         self.lsa_matrix = self.lsa_model.fit_transform(self.tfidf_matrix)
 
+    def normalize_text(self, text):
+        # Lowercasing and Tokenizing
+        tokens = self.tokenizer.tokenize(text.lower())
+        return ' '.join([token for token in tokens if token not in self.stop_words])
+
     def train_word2vec(self, documents):
-        tokenized_documents = [word_tokenize(doc.lower()) for doc in documents]
-        model = Word2Vec(tokenized_documents, vector_size=100, window=5, min_count=1, workers=4)
+        tokenized_documents = [self.tokenizer.tokenize(doc.lower()) for doc in documents]
+        phrases = Phrases(tokenized_documents, min_count=1, threshold=10)
+        bigram = gensim.models.phrases.Phraser(phrases)
+        bigram_documents = [bigram[doc] for doc in tokenized_documents]
+        model = Word2Vec(bigram_documents, vector_size=100, window=5, min_count=1, workers=4)
         return model
 
     def search(self, query, top_n=5):
-        # Process query for TF-IDF and Word2Vec
-        query_tfidf = self.tfidf_vectorizer.transform([query])
-        query_tokens = word_tokenize(query.lower())
+        # Normalizing and Processing Query
+        normalized_query = self.normalize_text(query)
+        query_tfidf = self.tfidf_vectorizer.transform([normalized_query])
+        query_tokens = self.tokenizer.tokenize(normalized_query.lower())
         query_vec = np.mean([self.word2vec.wv[token] for token in query_tokens if token in self.word2vec.wv], axis=0)
 
         # Calculate cosine similarity for TF-IDF and LSA
